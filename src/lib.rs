@@ -1,0 +1,11 @@
+pub mod app;
+pub mod archive;
+pub mod cache;
+pub mod config;
+pub mod files;
+pub mod help;
+pub mod operations;
+pub mod preview;
+pub mod search;
+pub mod ui;
+pub mod worker;

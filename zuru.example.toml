@@ -1,0 +1,44 @@
+# Run with: cargo run -- --config zuru.example.toml
+# Use `cargo run -- --config-path` to find the default per-user location.
+show_hidden = false
+image_protocol = "auto" # auto | halfblocks | kitty | iterm2 | sixel
+preview_max_bytes = 524288
+preview_max_lines = 4000
+thumbnail_cache_mb = 256 # set to 0 to disable persistent thumbnails
+
+[theme]
+background = "#0d1526"
+panel = "#111d33"
+foreground = "#d8e2f1"
+muted = "#7689a6"
+accent = "#7dcfff"
+selection = "#2b5fb8"
+border = "#293b57"
+normal = "#9ece6a"
+select = "#bb9af7"
+command = "#e0af68"
+danger = "#f7768e"
+slate = "#253550"
+
+[keys]
+# Each action replaces its complete default binding list.
+# Keys are case-sensitive. Sequences are separated by spaces.
+# Use ctrl-j, alt-j, space, enter, esc, up, down, etc.
+# Disable an action with []. Duplicates are rejected with a useful error.
+# down = ["j", "down"]
+# up = ["k", "up"]
+# first = ["g g", "home"]
+# preview_down = ["J", "ctrl-j"]
+# preview_up = ["K", "ctrl-k"]
+# search_name = ["s"]
+# search_contents = ["S"]
+# tasks = ["w"]
+# sort = [","]
+# bulk_rename = ["B"]
+# create_archive = ["C"]
+# extract = ["X"]
+# undo = ["u"]
+
+[bookmarks]
+# project = 'C:\Users\you\projects'
+# notes = "/home/you/notes"
