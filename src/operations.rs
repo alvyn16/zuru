@@ -988,7 +988,12 @@ fn trash_path_key(path: &Path) -> String {
         .to_lowercase()
 }
 
-#[cfg(not(windows))]
+#[cfg(all(
+    unix,
+    not(target_os = "macos"),
+    not(target_os = "ios"),
+    not(target_os = "android")
+))]
 fn trash_path_key(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
