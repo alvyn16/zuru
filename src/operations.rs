@@ -17,6 +17,7 @@ use std::{
 };
 use walkdir::WalkDir;
 
+#[cfg(windows)]
 static TRASH_TEMP_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug)]
