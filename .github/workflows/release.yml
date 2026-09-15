@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build portable Windows app
+        run: cargo build --release --locked
+      - name: Prepare download
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/zuru.exe dist/zuru-windows-x86_64.exe
+          $hash = (Get-FileHash dist/zuru-windows-x86_64.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  zuru-windows-x86_64.exe" | Set-Content -NoNewline dist/zuru-windows-x86_64.exe.sha256
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${{ github.ref_name }}"
+          dist/zuru-windows-x86_64.exe
+          dist/zuru-windows-x86_64.exe.sha256
+          --verify-tag
+          --generate-notes
+          --title "Zuru ${{ github.ref_name }}"

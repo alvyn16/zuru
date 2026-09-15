@@ -2,7 +2,17 @@
 
 A Rust terminal file manager inspired by yazi: three Miller columns, a dark navy palette, a full-width blue selection, Nerd Font icons, inline image previews, and a segmented status bar.
 
-## Run
+![Zuru showing a live image preview](assets/zuru-screenshot.png)
+
+## Download
+
+### [Download Zuru for Windows](https://github.com/alvyn16/zuru/releases/latest/download/zuru-windows-x86_64.exe)
+
+The download is a portable app: no installer and no Rust toolchain are required. Open Windows Terminal in any folder and run the downloaded `zuru-windows-x86_64.exe`. Choose a **Nerd Font** in your terminal for the intended icons.
+
+All published versions and checksums are available on the [Releases page](https://github.com/alvyn16/zuru/releases/latest).
+
+## Build from source
 
 ```sh
 cargo run
@@ -10,7 +20,7 @@ cargo run -- /path/to/folder
 cargo run -- --config zuru.example.toml
 ```
 
-Requires Rust 1.90+ and an interactive terminal. The crate uses Rust 2021. Choose a **Nerd Font** in your terminal for the icons and powerline separators. Windows Terminal / PowerShell, Linux, and macOS are supported by the underlying libraries; this build was tested on Windows.
+Building requires Rust 1.90+ and an interactive terminal. The crate uses Rust 2021. Choose a **Nerd Font** in your terminal for the icons and powerline separators. Windows Terminal / PowerShell, Linux, and macOS are supported by the underlying libraries; this build was tested on Windows.
 
 For an optimized binary:
 
