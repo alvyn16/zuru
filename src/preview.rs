@@ -157,6 +157,12 @@ pub struct PreviewStats {
 struct ThumbnailWrite {
     path: PathBuf,
     image: DynamicImage,
+    original_dimensions: (u32, u32),
+}
+
+struct CachedThumbnail {
+    image: DynamicImage,
+    original_dimensions: Option<(u32, u32)>,
 }
 
 struct ThumbnailCache {
@@ -174,15 +180,25 @@ impl ThumbnailCache {
             while let Ok(write) = receiver.recv() {
                 let write_id = THUMBNAIL_WRITE_ID.fetch_add(1, Ordering::Relaxed);
                 let temporary = write.path.with_extension(format!("qoi.{write_id}.tmp"));
-                if write
+                let dimensions = thumbnail_dimensions_path(&write.path);
+                let temporary_dimensions = dimensions.with_extension(format!("dim.{write_id}.tmp"));
+                let image_saved = write
                     .image
                     .save_with_format(&temporary, image::ImageFormat::Qoi)
-                    .is_ok()
-                {
+                    .is_ok();
+                let dimensions_saved = fs::write(
+                    &temporary_dimensions,
+                    encode_thumbnail_dimensions(write.original_dimensions),
+                )
+                .is_ok();
+                if image_saved && dimensions_saved {
                     let _ = fs::remove_file(&write.path);
+                    let _ = fs::remove_file(&dimensions);
                     let _ = fs::rename(&temporary, &write.path);
+                    let _ = fs::rename(&temporary_dimensions, dimensions);
                 } else {
                     let _ = fs::remove_file(&temporary);
+                    let _ = fs::remove_file(&temporary_dimensions);
                 }
             }
         });
@@ -197,19 +213,30 @@ impl ThumbnailCache {
         self.directory.join(format!("{:016x}.qoi", hasher.finish()))
     }
 
-    fn load(&self, stamp: &FileStamp, width: u32, height: u32) -> Option<DynamicImage> {
+    fn load(&self, stamp: &FileStamp, width: u32, height: u32) -> Option<CachedThumbnail> {
         let path = self.path(stamp, width, height);
         let decoded = ImageReader::open(&path)
             .ok()
             .and_then(|image| image.with_guessed_format().ok())
             .and_then(|image| image.decode().ok());
         if decoded.is_none() && path.exists() {
-            let _ = fs::remove_file(path);
+            let _ = fs::remove_file(&path);
+            let _ = fs::remove_file(thumbnail_dimensions_path(&path));
         }
-        decoded
+        decoded.map(|image| CachedThumbnail {
+            image,
+            original_dimensions: read_thumbnail_dimensions(&path),
+        })
     }
 
-    fn store(&self, stamp: &FileStamp, width: u32, height: u32, image: &DynamicImage) {
+    fn store(
+        &self,
+        stamp: &FileStamp,
+        width: u32,
+        height: u32,
+        image: &DynamicImage,
+        original_dimensions: (u32, u32),
+    ) {
         let path = self.path(stamp, width, height);
         if path.exists() {
             return;
@@ -217,12 +244,48 @@ impl ThumbnailCache {
         let _ = self.writer.send(ThumbnailWrite {
             path,
             image: image.clone(),
+            original_dimensions,
         });
     }
 
-    fn remove(&self, stamp: &FileStamp, width: u32, height: u32) {
-        let _ = fs::remove_file(self.path(stamp, width, height));
+    fn store_dimensions(&self, stamp: &FileStamp, width: u32, height: u32, dimensions: (u32, u32)) {
+        let path = thumbnail_dimensions_path(&self.path(stamp, width, height));
+        let write_id = THUMBNAIL_WRITE_ID.fetch_add(1, Ordering::Relaxed);
+        let temporary = path.with_extension(format!("dim.{write_id}.tmp"));
+        if fs::write(&temporary, encode_thumbnail_dimensions(dimensions)).is_ok() {
+            let _ = fs::remove_file(&path);
+            let _ = fs::rename(&temporary, path);
+        } else {
+            let _ = fs::remove_file(temporary);
+        }
     }
+
+    fn remove(&self, stamp: &FileStamp, width: u32, height: u32) {
+        let path = self.path(stamp, width, height);
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(thumbnail_dimensions_path(&path));
+    }
+}
+
+fn thumbnail_dimensions_path(path: &Path) -> PathBuf {
+    path.with_extension("qoi.dim")
+}
+
+fn encode_thumbnail_dimensions((width, height): (u32, u32)) -> [u8; 8] {
+    let mut encoded = [0; 8];
+    encoded[..4].copy_from_slice(&width.to_le_bytes());
+    encoded[4..].copy_from_slice(&height.to_le_bytes());
+    encoded
+}
+
+fn read_thumbnail_dimensions(path: &Path) -> Option<(u32, u32)> {
+    let encoded: [u8; 8] = fs::read(thumbnail_dimensions_path(path))
+        .ok()?
+        .try_into()
+        .ok()?;
+    let width = u32::from_le_bytes(encoded[..4].try_into().ok()?);
+    let height = u32::from_le_bytes(encoded[4..].try_into().ok()?);
+    (width > 0 && height > 0).then_some((width, height))
 }
 
 pub struct Previewer {
@@ -495,15 +558,23 @@ impl Previewer {
             }
         }
         if !req.zoom {
-            if let Some(displayed) = self
+            if let Some(cached) = self
                 .thumbnails
                 .as_ref()
                 .and_then(|cache| cache.load(&stamp, pixels_w, pixels_h))
             {
                 check(token)?;
                 self.stats.disk_cache_hits += 1;
-                let (width, height) = oriented_dimensions(&req.entry.path)?;
-                let protocol = self.encode_image(displayed, req, halfblocks)?;
+                let (width, height) = if let Some(dimensions) = cached.original_dimensions {
+                    dimensions
+                } else {
+                    let dimensions = oriented_dimensions(&req.entry.path)?;
+                    if let Some(cache) = &self.thumbnails {
+                        cache.store_dimensions(&stamp, pixels_w, pixels_h, dimensions);
+                    }
+                    dimensions
+                };
+                let protocol = self.encode_image(cached.image, req, halfblocks)?;
                 self.stats.image_encodes += 1;
                 return Ok(Preview::Image {
                     protocol: Arc::new(protocol),
@@ -588,7 +659,7 @@ impl Previewer {
         check(token)?;
         if !req.zoom {
             if let Some(cache) = &self.thumbnails {
-                cache.store(&stamp, pixels_w, pixels_h, &displayed);
+                cache.store(&stamp, pixels_w, pixels_h, &displayed, (width, height));
             }
         }
         let protocol = self.encode_image(displayed, req, halfblocks)?;
@@ -654,10 +725,13 @@ fn trim_thumbnail_cache(directory: &Path, budget: u64) {
             }
             let metadata = entry.metadata().ok()?;
             metadata.is_file().then(|| {
+                let dimensions_size = fs::metadata(thumbnail_dimensions_path(&entry.path()))
+                    .map(|metadata| metadata.len())
+                    .unwrap_or(0);
                 (
                     entry.path(),
                     metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
-                    metadata.len(),
+                    metadata.len().saturating_add(dimensions_size),
                 )
             })
         })
@@ -671,7 +745,8 @@ fn trim_thumbnail_cache(directory: &Path, budget: u64) {
         if bytes <= budget {
             break;
         }
-        if fs::remove_file(path).is_ok() {
+        if fs::remove_file(&path).is_ok() {
+            let _ = fs::remove_file(thumbnail_dimensions_path(&path));
             bytes = bytes.saturating_sub(size);
         }
     }

@@ -652,12 +652,18 @@ fn persistent_thumbnail_cache_avoids_a_second_full_decode() {
     assert!(matches!(first.load(&request), Preview::Image { .. }));
     let started = Instant::now();
     while fs::read_dir(&cache)
-        .map(|mut files| {
-            !files.any(|entry| {
-                entry
-                    .ok()
-                    .is_some_and(|entry| entry.path().extension().is_some_and(|ext| ext == "qoi"))
-            })
+        .map(|files| {
+            let extensions = files
+                .filter_map(Result::ok)
+                .filter_map(|entry| {
+                    entry
+                        .path()
+                        .extension()
+                        .map(|extension| extension.to_owned())
+                })
+                .collect::<Vec<_>>();
+            !extensions.iter().any(|extension| extension == "qoi")
+                || !extensions.iter().any(|extension| extension == "dim")
         })
         .unwrap_or(true)
     {
@@ -666,7 +672,14 @@ fn persistent_thumbnail_cache_avoids_a_second_full_decode() {
     }
     let mut second =
         Previewer::with_thumbnail_cache(Picker::halfblocks(), Config::default(), Some(cache));
-    assert!(matches!(second.load(&request), Preview::Image { .. }));
+    assert!(matches!(
+        second.load(&request),
+        Preview::Image {
+            width: 320,
+            height: 180,
+            ..
+        }
+    ));
     assert_eq!(second.stats().image_decodes, 0);
     assert_eq!(second.stats().disk_cache_hits, 1);
 }
