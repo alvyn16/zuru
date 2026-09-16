@@ -4,6 +4,7 @@ pub mod cache;
 pub mod config;
 pub mod files;
 pub mod help;
+pub mod media;
 pub mod operations;
 pub mod preview;
 pub mod search;

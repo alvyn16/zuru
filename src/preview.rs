@@ -3,6 +3,7 @@ use crate::{
     cache::Cache,
     config::Config,
     files::{self, Entry},
+    media::{self, MediaKind},
     worker::{latest_channel, CancellationToken, LatestSender},
 };
 use anyhow::{Context, Result};
@@ -21,7 +22,7 @@ use std::{
     collections::hash_map::DefaultHasher,
     fs::{self, File},
     hash::{Hash, Hasher},
-    io::Read,
+    io::{Cursor, Read},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -52,6 +53,11 @@ pub enum Preview {
     },
     Directory(Vec<Entry>),
     Archive(ArchiveListing),
+    Media {
+        kind: MediaKind,
+        details: Arc<Vec<(String, String)>>,
+        artwork: Option<Arc<Protocol>>,
+    },
     Metadata {
         entry: Entry,
         note: String,
@@ -69,6 +75,17 @@ impl Preview {
                 .entries
                 .len()
                 .saturating_sub(height.saturating_sub(1)),
+            Self::Media {
+                details, artwork, ..
+            } => {
+                let artwork_rows = artwork
+                    .as_ref()
+                    .map(|artwork| usize::from(artwork.size().height).saturating_add(1))
+                    .unwrap_or(0);
+                details
+                    .len()
+                    .saturating_sub(height.saturating_sub(artwork_rows))
+            }
             _ => 0,
         }
     }
@@ -100,6 +117,7 @@ impl Preview {
                 if listing.truncated { " · LIMITED" } else { "" }
             ),
             Self::Metadata { .. } => "FILE DETAILS".into(),
+            Self::Media { kind, .. } => format!("{} PREVIEW", kind.label()),
             _ => "PREVIEW".into(),
         }
     }
@@ -387,13 +405,15 @@ impl Previewer {
             file: stamp.clone(),
             viewport: None,
         };
+        let media_kind = media::kind(&entry.path, &entry.mime);
+        let image_zoom = req.zoom && media_kind.is_none();
         let image_key = PreviewKey {
             file: stamp.clone(),
             viewport: Some((
                 req.size.width,
                 req.size.height,
-                req.zoom,
-                if req.zoom { req.scroll } else { 0 },
+                image_zoom,
+                if image_zoom { req.scroll } else { 0 },
             )),
         };
         if let Some(preview) = self
@@ -413,6 +433,22 @@ impl Previewer {
                 .sum::<usize>();
             let preview = Preview::Archive(listing);
             self.rendered.insert(text_key, preview.clone(), weight);
+            return Ok(preview);
+        }
+        if let Some(kind) = media_kind {
+            let preview = self.load_media(req, stamp, kind, token)?;
+            let cells = usize::from(req.size.width) * usize::from(req.size.height);
+            let font = self.picker.font_size();
+            let weight = if self.picker.protocol_type() == ProtocolType::Halfblocks {
+                cells.saturating_mul(48)
+            } else {
+                cells
+                    .saturating_mul(usize::from(font.width))
+                    .saturating_mul(usize::from(font.height))
+                    .saturating_mul(16)
+            }
+            .saturating_add(16 * 1024);
+            self.rendered.insert(image_key, preview.clone(), weight);
             return Ok(preview);
         }
         let mut head = [0u8; 32];
@@ -534,6 +570,81 @@ impl Previewer {
         };
         self.rendered.insert(text_key, preview.clone(), weight);
         Ok(preview)
+    }
+
+    fn load_media(
+        &mut self,
+        req: &PreviewRequest,
+        stamp: FileStamp,
+        kind: MediaKind,
+        token: Option<&CancellationToken>,
+    ) -> Result<Preview> {
+        check(token)?;
+        let art_size = Size::new(req.size.width, req.size.height.saturating_sub(8).max(1));
+        let halfblocks = self.picker.protocol_type() == ProtocolType::Halfblocks;
+        let font = self.picker.font_size();
+        let (cell_w, cell_h) = if halfblocks {
+            (1, 2)
+        } else {
+            (u32::from(font.width), u32::from(font.height))
+        };
+        let pixels_w = u32::from(art_size.width.max(1)) * cell_w;
+        let pixels_h = u32::from(art_size.height.max(1)) * cell_h;
+        if req.force {
+            if let Some(cache) = &self.thumbnails {
+                cache.remove(&stamp, pixels_w, pixels_h);
+            }
+        }
+        let can_show_artwork = art_size.height >= 3 && art_size.width >= 8;
+        let cached = can_show_artwork
+            .then(|| {
+                self.thumbnails
+                    .as_ref()
+                    .and_then(|cache| cache.load(&stamp, pixels_w, pixels_h))
+            })
+            .flatten();
+        let data = media::load(
+            &req.entry.path,
+            kind,
+            can_show_artwork && cached.is_none(),
+            token,
+        );
+        check(token)?;
+        let displayed = if let Some(cached) = cached {
+            self.stats.disk_cache_hits += 1;
+            Some(cached.image)
+        } else if let Some(bytes) = data.artwork {
+            decode_artwork(&bytes).ok().map(|image| {
+                let displayed = fit_image(&image, pixels_w, pixels_h);
+                if let Some(cache) = &self.thumbnails {
+                    cache.store(
+                        &stamp,
+                        pixels_w,
+                        pixels_h,
+                        &displayed,
+                        (image.width(), image.height()),
+                    );
+                }
+                displayed
+            })
+        } else {
+            None
+        };
+        check(token)?;
+        let artwork = displayed
+            .map(|image| {
+                self.encode_image_for_size(image, art_size, halfblocks)
+                    .map(Arc::new)
+            })
+            .transpose()?;
+        if artwork.is_some() {
+            self.stats.image_encodes += 1;
+        }
+        Ok(Preview::Media {
+            kind: data.kind,
+            details: Arc::new(data.details),
+            artwork,
+        })
     }
 
     fn load_image(
@@ -681,6 +792,15 @@ impl Previewer {
         req: &PreviewRequest,
         halfblocks: bool,
     ) -> Result<Protocol> {
+        self.encode_image_for_size(displayed, req.size, halfblocks)
+    }
+
+    fn encode_image_for_size(
+        &self,
+        displayed: DynamicImage,
+        size: Size,
+        halfblocks: bool,
+    ) -> Result<Protocol> {
         if halfblocks {
             let cells = Size::new(
                 displayed.width() as u16,
@@ -702,11 +822,31 @@ impl Previewer {
         } else {
             Ok(self.picker.new_protocol(
                 displayed,
-                req.size,
+                size,
                 Resize::Fit(Some(FilterType::Triangle)),
             )?)
         }
     }
+}
+
+fn decode_artwork(bytes: &[u8]) -> Result<DynamicImage> {
+    let mut reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16384);
+    limits.max_image_height = Some(16384);
+    limits.max_alloc = Some(128 * 1024 * 1024);
+    reader.limits(limits);
+    let mut decoder = reader.into_decoder()?;
+    anyhow::ensure!(
+        decoder.total_bytes() <= 128 * 1024 * 1024,
+        "Artwork is too large"
+    );
+    let orientation = decoder
+        .orientation()
+        .unwrap_or(image::metadata::Orientation::NoTransforms);
+    let mut image = DynamicImage::from_decoder(decoder)?;
+    image.apply_orientation(orientation);
+    Ok(image)
 }
 
 fn trim_thumbnail_cache(directory: &Path, budget: u64) {

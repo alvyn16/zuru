@@ -140,7 +140,7 @@ pub fn lines(config: &Config, page: usize, width: usize) -> Vec<Line<'static>> {
         2 => {
             guide.title("LOOK INSIDE A FILE");
             guide.note(
-                "Highlight an image, code file, text file, folder, or archive to preview it automatically.",
+                "Highlight an image, music file, video, code file, text file, folder, or archive to preview it automatically.",
             );
             guide.space();
             for (action, text) in [
@@ -152,6 +152,9 @@ pub fn lines(config: &Config, page: usize, width: usize) -> Vec<Line<'static>> {
             ] {
                 guide.action(action, text);
             }
+            guide.space();
+            guide.title("MUSIC & VIDEO");
+            guide.note("Music shows track details and embedded album art. Video shows a still frame and media details when ffmpeg and ffprobe are installed. Press Enter to play in your default media app. Use preview scrolling if the details do not fit.");
             guide.space();
             guide.title("ARCHIVES");
             guide.note("ZIP, TAR, TAR.GZ, and TGZ files show their contents without extraction. Archive creation and extraction run in the task worker, so you can keep navigating.");

@@ -1,6 +1,6 @@
 # Zuru
 
-A Rust terminal file manager inspired by yazi: three Miller columns, a dark navy palette, a full-width blue selection, Nerd Font icons, inline image previews, and a segmented status bar.
+A Rust terminal file manager inspired by yazi: three Miller columns, a dark navy palette, a full-width blue selection, Nerd Font icons, image/music/video previews, and a segmented status bar.
 
 ![Zuru showing a live image preview](assets/zuru-screenshot.png)
 
@@ -79,7 +79,8 @@ Commands: `:cd PATH`, `:find NAME`, `:grep TEXT`, `:mkdir NAME`, `:touch NAME`, 
 
 - Images are decoded and resized/encoded **off the UI thread** with `image` and `ratatui-image`. Automatic detection selects Kitty, iTerm2, or Sixel when available, with Unicode half-blocks otherwise. Detection may take about two seconds at startup. Use `--protocol halfblocks` to bypass it or force another supported protocol with `--protocol kitty|iterm2|sixel`.
 - Image fit mode preserves aspect ratio. Width mode scales to the preview width and lets J/K scroll the image vertically. Preview results are cached by file stamp and viewport. The worker preloads up to four nearby files and keeps viewport-sized QOI thumbnails with their original dimensions in the per-user Zuru cache, avoiding another source-image read after restarting. `thumbnail_cache_mb` controls its size and `0` disables it. Animated images show their first frame.
-- UTF-8 text uses syntect syntax highlighting, line numbers, and vertical scrolling. Text is capped at 512 KiB / 4,000 lines by default; very long lines are limited to 800 characters. Limited previews are labeled. No video thumbnails or raw binary dumps.
+- UTF-8 text uses syntect syntax highlighting, line numbers, and vertical scrolling. Text is capped at 512 KiB / 4,000 lines by default; very long lines are limited to 800 characters. Limited previews are labeled.
+- Music previews show tags, duration, sample rate, bitrate, channel count, and embedded cover art for supported audio formats. Video previews show a still frame, duration, resolution, and codecs when `ffmpeg` and `ffprobe` are on your PATH. Enter / `o` plays media in the system's default app. Artwork and video frames use the persistent thumbnail cache; media is excluded from neighboring-file preloading. Video processes stop when navigation cancels their request and have a five-second timeout.
 - Directory previews show a sorted miniature listing. ZIP, TAR, TAR.GZ, and TGZ previews show contained paths and unpacked sizes without extraction. Unsupported/binary files show size, MIME guess, modified time, and permissions. Windows permission strings approximate read-only status; they do not represent NTFS ACLs.
 - Directory reads use jwalk on a background worker. Directory previews use lightweight names and types, while full metadata is loaded only for the active listing. A single-slot mailbox drops queued requests superseded by new navigation; cancellation also stops stale directory and preview work early. Preview work has its own bounded cache and worker, and file operations run on a separate serialized worker.
 - `notify` refreshes the current and parent listings and the selected directory's preview after external changes. Tabs retain independent directories, cursors, filters, and selection sets; switching tabs reloads their filesystem state. Watcher failures are visible and manual refresh remains available. Listings render only the visible rows, even in very large directories.
@@ -168,4 +169,4 @@ The Python helper requires Pillow; it is not needed to build or run Zuru. Native
 
 ## Structure
 
-`app.rs` handles modes, tabs, key routing, and worker coordination; `ui.rs` renders the panes and overlays; `files.rs` reads directories and metadata; `preview.rs` creates and preloads preview content; `archive.rs` creates, extracts, and lists archives; `search.rs` performs recursive searches; `operations.rs` runs tracked file tasks and undo; `config.rs` loads TOML and bookmarks; `worker.rs` supplies the latest-request mailbox; `main.rs` owns the terminal lifecycle and shell integration.
+`app.rs` handles modes, tabs, key routing, and worker coordination; `ui.rs` renders the panes and overlays; `files.rs` reads directories and metadata; `preview.rs` creates and preloads preview content; `media.rs` reads music metadata and generates video frames; `archive.rs` creates, extracts, and lists archives; `search.rs` performs recursive searches; `operations.rs` runs tracked file tasks and undo; `config.rs` loads TOML and bookmarks; `worker.rs` supplies the latest-request mailbox; `main.rs` owns the terminal lifecycle and shell integration.

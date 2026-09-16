@@ -57,6 +57,12 @@ impl Entry {
         if self.mime.starts_with("image/") {
             return "";
         }
+        if let Some(kind) = crate::media::kind(&self.path, &self.mime) {
+            return match kind {
+                crate::media::MediaKind::Audio => "",
+                crate::media::MediaKind::Video => "",
+            };
+        }
         let ext = self
             .path
             .extension()
@@ -73,8 +79,10 @@ impl Entry {
             "zip" | "tar" | "gz" | "7z" | "rar" | "xz" | "bz2" => "",
             "md" => "",
             "pdf" => "",
-            "mp3" | "flac" | "wav" | "ogg" => "",
-            "mp4" | "mkv" | "mov" => "",
+            "mp3" | "flac" | "wav" | "ogg" | "oga" | "opus" | "m4a" | "aac" | "wma" | "aiff"
+            | "aif" | "ape" | "mpc" => "",
+            "mp4" | "mkv" | "mov" | "avi" | "webm" | "m4v" | "wmv" | "flv" | "mpg" | "mpeg"
+            | "mts" | "m2ts" => "",
             "exe" | "dll" | "so" => "",
             "sh" | "ps1" | "bat" => "",
             _ => "",

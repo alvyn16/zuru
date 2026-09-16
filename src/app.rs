@@ -577,7 +577,7 @@ impl App {
                 else {
                     continue;
                 };
-                if !entry.is_dir {
+                if !entry.is_dir && crate::media::kind(&entry.path, &entry.mime).is_none() {
                     preload.push(entry.clone());
                     if preload.len() == 4 {
                         return preload;
@@ -592,7 +592,10 @@ impl App {
         let size = Size::new(size.width.max(1), size.height.max(1));
         if self.preview_size != size {
             self.preview_size = size;
-            if matches!(self.preview, Preview::Image { .. } | Preview::Loading) {
+            if matches!(
+                self.preview,
+                Preview::Image { .. } | Preview::Media { .. } | Preview::Loading
+            ) {
                 self.request_preview(false);
             } else {
                 self.preview_scroll = self

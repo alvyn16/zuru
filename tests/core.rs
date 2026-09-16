@@ -14,6 +14,7 @@ use zuru::{
     archive,
     config::{self, Config},
     files::{self, Entry},
+    media::MediaKind,
     operations::{
         self, Conflict, ConflictChoice, Operation, OperationEvent, OperationResult, TaskProgress,
         UndoAction,
@@ -982,6 +983,61 @@ fn preview_routes_code_binary_directory_and_truncated_text() {
         previewer.load(&request(dir.path().join("bad.png"))),
         Preview::Error(_)
     ));
+}
+
+#[test]
+fn audio_preview_reads_duration_and_renders_playback_guidance() {
+    let dir = fixture();
+    let path = dir.path().join("song.wav");
+    let data_size = 16_000u32;
+    let mut wav = Vec::new();
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data_size).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&8_000u32.to_le_bytes());
+    wav.extend_from_slice(&16_000u32.to_le_bytes());
+    wav.extend_from_slice(&2u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_size.to_le_bytes());
+    wav.resize(44 + data_size as usize, 0);
+    fs::write(&path, wav).unwrap();
+    assert_eq!(Entry::read(path.clone()).unwrap().icon(), "");
+    let mut previewer = Previewer::new(Picker::halfblocks(), Config::default());
+    let preview = previewer.load(&request(path));
+    match &preview {
+        Preview::Media {
+            kind,
+            details,
+            artwork,
+        } => {
+            assert_eq!(*kind, MediaKind::Audio);
+            assert!(details.contains(&("Duration".into(), "0:01".into())));
+            assert!(details
+                .iter()
+                .any(|(label, value)| label == "Audio" && value.contains("8.0 kHz")));
+            assert!(artwork.is_none());
+        }
+        _ => panic!("Expected audio preview"),
+    }
+    let mut app = app(dir.path());
+    loaded(&mut app);
+    app.preview = preview;
+    let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+    terminal.draw(|frame| ui::draw(frame, &mut app)).unwrap();
+    let rendered: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(rendered.contains("AUDIO PREVIEW"));
+    assert!(rendered.contains("Duration"));
+    assert!(rendered.contains("Enter or o"));
 }
 
 #[test]

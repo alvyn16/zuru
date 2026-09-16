@@ -319,17 +319,7 @@ fn preview_pane(frame: &mut Frame<'_>, app: &App, area: Rect, inner: Rect) {
         ),
         Preview::Image { protocol, .. } => {
             // Graphics protocols can paint over popups; suppress them while a popup is open.
-            if matches!(
-                app.mode,
-                Mode::Help { .. }
-                    | Mode::Bookmarks { .. }
-                    | Mode::ConfirmTrash(_)
-                    | Mode::Tasks
-                    | Mode::Conflict(_)
-                    | Mode::Sort
-                    | Mode::BulkRename(_)
-                    | Mode::UndoHistory
-            ) {
+            if preview_images_hidden(app) {
                 return;
             }
             let size = protocol.size();
@@ -426,6 +416,47 @@ fn preview_pane(frame: &mut Frame<'_>, app: &App, area: Rect, inner: Rect) {
             );
             frame.render_widget(Paragraph::new(lines), inner);
         }
+        Preview::Media {
+            details, artwork, ..
+        } => {
+            let mut details_area = inner;
+            if let Some(artwork) = artwork {
+                let size = artwork.size();
+                let height = inner.height.min(size.height);
+                if !preview_images_hidden(app) {
+                    frame.render_widget(
+                        Image::new(artwork),
+                        Rect::new(
+                            inner.x + inner.width.saturating_sub(size.width) / 2,
+                            inner.y,
+                            inner.width.min(size.width),
+                            height,
+                        ),
+                    );
+                }
+                let rows = height.saturating_add(1).min(inner.height);
+                details_area.y += rows;
+                details_area.height -= rows;
+            }
+            let lines: Vec<_> = details
+                .iter()
+                .skip(app.preview_scroll)
+                .take(details_area.height as usize)
+                .map(|(label, value)| {
+                    Line::from(vec![
+                        Span::styled(
+                            format!("{label:<11}"),
+                            Style::default().fg(color(&t.accent)),
+                        ),
+                        Span::styled(value.clone(), Style::default().fg(color(&t.foreground))),
+                    ])
+                })
+                .collect();
+            frame.render_widget(
+                Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false }),
+                details_area,
+            );
+        }
         Preview::Metadata { entry, note } => metadata(frame, app, entry, note, inner),
     }
     let max = app.preview.max_scroll(inner.height as usize);
@@ -442,6 +473,20 @@ fn preview_pane(frame: &mut Frame<'_>, app: &App, area: Rect, inner: Rect) {
             );
         }
     }
+}
+
+fn preview_images_hidden(app: &App) -> bool {
+    matches!(
+        app.mode,
+        Mode::Help { .. }
+            | Mode::Bookmarks { .. }
+            | Mode::ConfirmTrash(_)
+            | Mode::Tasks
+            | Mode::Conflict(_)
+            | Mode::Sort
+            | Mode::BulkRename(_)
+            | Mode::UndoHistory
+    )
 }
 
 fn metadata(frame: &mut Frame<'_>, app: &App, entry: &Entry, note: &str, area: Rect) {
